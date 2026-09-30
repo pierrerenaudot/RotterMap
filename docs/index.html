@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>My Runs in Rotterdam</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+  :root {
+    --bg: #1b1b1b;
+    --panel-bg: #262626;
+    --text: #eee;
+    --text-dim: #999;
+  }
+  html, body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: var(--bg);
+  }
+  #map {
+    position: absolute;
+    inset: 0;
+    background: var(--bg);
+  }
+  .panel {
+    position: absolute;
+    top: 12px;
+    left: 12px;
+    z-index: 1000;
+    background: var(--panel-bg);
+    border-radius: 10px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.35);
+    padding: 14px;
+    width: 220px;
+    font-size: 13px;
+  }
+  .panel h3 {
+    margin: 0 0 8px;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-dim);
+  }
+  .stats-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+  .stat {
+    background: var(--bg);
+    border-radius: 8px;
+    padding: 8px 10px;
+  }
+  .stat .value { font-size: 18px; font-weight: 700; color: var(--text); }
+  .stat .label { font-size: 11px; color: var(--text-dim); }
+
+  @media (max-width: 700px) {
+    .panel {
+      left: 8px;
+      right: 8px;
+      width: auto;
+    }
+  }
+</style>
+</head>
+<body>
+<div id="map"></div>
+
+<div class="panel" id="panel">
+  <h3>Stats</h3>
+  <div class="stats-grid">
+    <div class="stat"><div class="value" id="statRuns">–</div><div class="label">runs</div></div>
+    <div class="stat"><div class="value" id="statKm">–</div><div class="label">total km</div></div>
+    <div class="stat"><div class="value" id="statCoverage">–</div><div class="label">Rotterdam explored</div></div>
+    <div class="stat"><div class="value" id="statAvgPace">–</div><div class="label">avg pace /km</div></div>
+  </div>
+</div>
+
+<script>
+// Dutch orange, kept bold and opaque everywhere so every track pops against
+// the map at a glance. This is a public, anonymized view: runs.public.geojson
+// carries geometry only (no dates, names, pace, or Strava links), and
+// stats.json carries only aggregate numbers (see make_public_geojson.py).
+const ORANGE = [255, 111, 0];
+const FLAT_OPACITY = 0.92;
+const FLAT_WEIGHT = 3.5;
+
+const map = L.map('map', { zoomControl: true, preferCanvas: true, attributionControl: true });
+
+L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+  maxZoom: 19,
+}).addTo(map);
+// No free no-key dark tile source, so the dark look is simulated with CSS
+// filters on the tile pane (inverted, grayscaled OSM tiles).
+map.getPane('tilePane').style.filter =
+  'grayscale(1) invert(1) brightness(0.75) contrast(1.05) sepia(1) hue-rotate(178deg) saturate(2.6)';
+
+map.createPane('flatPane');
+map.getPane('flatPane').style.zIndex = 450;
+
+fetch('stats.json')
+  .then(r => r.ok ? r.json() : {})
+  .then(stats => {
+    document.getElementById('statRuns').textContent = stats.runs ?? '–';
+    document.getElementById('statKm').textContent = stats.total_km ?? '–';
+    document.getElementById('statCoverage').textContent = stats.rotterdam_pct != null ? `${stats.rotterdam_pct}%` : '–';
+    document.getElementById('statAvgPace').textContent = stats.avg_pace ?? '–';
+  })
+  .catch(() => {});
+
+fetch('runs.public.geojson')
+  .then(r => {
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    return r.json();
+  })
+  .then(data => {
+    const bounds = L.latLngBounds([]);
+    for (const f of data.features) {
+      const latlngs = f.geometry.coordinates.map(([lon, lat]) => [lat, lon]);
+      L.polyline(latlngs, {
+        color: `rgb(${ORANGE.join(',')})`,
+        weight: FLAT_WEIGHT,
+        opacity: FLAT_OPACITY,
+        pane: 'flatPane',
+        lineCap: 'round',
+        lineJoin: 'round',
+      }).addTo(map);
+      for (const ll of latlngs) bounds.extend(ll);
+    }
+    if (bounds.isValid()) {
+      map.fitBounds(bounds, { padding: [30, 30] });
+    } else {
+      map.setView([51.92, 4.48], 12);
+    }
+  })
+  .catch(err => {
+    console.error(err);
+    map.setView([51.92, 4.48], 12);
+  });
+</script>
+</body>
+</html>

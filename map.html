@@ -1,0 +1,270 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>My Runs in the Netherlands</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+  :root {
+    --bg: #1b1b1b;
+    --panel-bg: #262626;
+    --text: #eee;
+    --text-dim: #999;
+    --border: #3a3a3a;
+    --accent: #ff6a00;
+  }
+  html, body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+  }
+  #map {
+    position: absolute;
+    inset: 0;
+    background: #1b1b1b;
+  }
+  .topbar {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    z-index: 1000;
+    display: flex;
+    justify-content: flex-end;
+    align-items: flex-start;
+    gap: 6px;
+    pointer-events: none;
+  }
+  .topbar > * { pointer-events: auto; }
+  .btn {
+    background: var(--panel-bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 8px;
+    padding: 7px 10px;
+    font-size: 13px;
+    cursor: pointer;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.35);
+    white-space: nowrap;
+  }
+  .btn.active {
+    background: var(--accent);
+    color: white;
+    border-color: var(--accent);
+  }
+  .panel-toggle {
+    display: none;
+  }
+  .panel {
+    position: absolute;
+    top: 12px;
+    left: 12px;
+    z-index: 1000;
+    background: var(--panel-bg);
+    border-radius: 10px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.35);
+    padding: 14px;
+    width: 220px;
+    font-size: 13px;
+  }
+  .panel h3 {
+    margin: 0 0 8px;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-dim);
+  }
+  .stats-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+  .stat {
+    background: var(--bg);
+    border-radius: 8px;
+    padding: 8px 10px;
+  }
+  .stat .value { font-size: 18px; font-weight: 700; }
+  .stat .label { font-size: 11px; color: var(--text-dim); }
+  .popup-content { font-size: 13px; line-height: 1.5; }
+  .popup-content .pname { font-weight: 700; margin-bottom: 2px; }
+  .popup-content .pdate { color: #666; margin-bottom: 6px; }
+  .popup-content a { color: var(--accent); }
+
+  @media (max-width: 700px) {
+    .topbar {
+      flex-wrap: wrap;
+      left: 12px;
+    }
+    .btn {
+      font-size: 12px;
+      padding: 6px 8px;
+    }
+    .panel {
+      left: 8px;
+      right: 8px;
+      top: auto;
+      bottom: 8px;
+      width: auto;
+      transform: translateY(calc(100% + 8px));
+      transition: transform 0.2s ease;
+    }
+    .panel.open { transform: translateY(0); }
+    .panel-toggle {
+      display: inline-block;
+    }
+  }
+</style>
+</head>
+<body>
+<div id="map"></div>
+
+<div class="topbar">
+  <button class="btn panel-toggle" id="panelToggleBtn">☰ Stats</button>
+</div>
+
+<div class="panel" id="panel">
+  <h3>Stats</h3>
+  <div class="stats-grid">
+    <div class="stat"><div class="value" id="statRuns">–</div><div class="label">runs</div></div>
+    <div class="stat"><div class="value" id="statKm">–</div><div class="label">total km</div></div>
+    <div class="stat"><div class="value" id="statCoverage">–</div><div class="label">Rotterdam explored</div></div>
+    <div class="stat"><div class="value" id="statAvgPace">–</div><div class="label">avg pace /km</div></div>
+  </div>
+</div>
+
+<script>
+// Dutch orange, kept bold and opaque everywhere so every track pops against
+// the map at a glance.
+const ORANGE = [255, 111, 0];
+const FLAT_OPACITY = 0.92;
+const FLAT_WEIGHT = 3.5;
+
+// Computed offline by coverage.py: % of Rotterdam's street/path network
+// (OSM, "city" boundary) run within 20m at least once. Update by re-running
+// that script after a fresh export and pasting its "Rigorous" percentage here.
+const ROTTERDAM_COVERAGE_PCT = 11.7;
+
+let state = {
+  allFeatures: [],
+};
+
+const map = L.map('map', { zoomControl: true, preferCanvas: true });
+
+const tiles = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+  maxZoom: 19,
+});
+tiles.addTo(map);
+// No free no-key dark tile source, so the dark look is simulated with CSS
+// filters on the tile pane (inverted, grayscaled OSM tiles). Grayscale first
+// strips every road/building hue (which would otherwise compete with the
+// orange/red run tracks), then sepia+hue-rotate tints the result blue/green
+// so the basemap reads as black/green/blue only.
+map.getPane('tilePane').style.filter =
+  'grayscale(1) invert(1) brightness(0.75) contrast(1.05) sepia(1) hue-rotate(178deg) saturate(2.6)';
+
+map.createPane('flatPane');
+map.getPane('flatPane').style.zIndex = 450;
+
+let flatLayer = L.layerGroup();
+
+function parsePaceToSeconds(pace) {
+  if (!pace) return null;
+  const m = pace.match(/^(\d+):(\d\d)/);
+  if (!m) return null;
+  return parseInt(m[1], 10) * 60 + parseInt(m[2], 10);
+}
+function formatSecondsAsPace(s) {
+  const m = Math.floor(s / 60);
+  const sec = Math.round(s % 60);
+  return `${m}:${String(sec).padStart(2, '0')}/km`;
+}
+
+function popupHtml(props) {
+  const stravaLink = props.strava_url
+    ? `<a href="${props.strava_url}" target="_blank" rel="noopener">View on Strava →</a>`
+    : '';
+  return `<div class="popup-content">
+    <div class="pname">${escapeHtml(props.name || 'Run')}</div>
+    <div class="pdate">${props.date}</div>
+    <div>${props.distance_km} km · ${props.duration} · ${props.avg_pace}</div>
+    <div style="margin-top:6px;">${stravaLink}</div>
+  </div>`;
+}
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function buildFlatLayer(features) {
+  const layer = L.layerGroup();
+  for (const f of features) {
+    const latlngs = f.geometry.coordinates.map(([lon, lat]) => [lat, lon]);
+    const line = L.polyline(latlngs, {
+      color: `rgb(${ORANGE.join(',')})`,
+      weight: FLAT_WEIGHT,
+      opacity: FLAT_OPACITY,
+      pane: 'flatPane',
+      lineCap: 'round',
+      lineJoin: 'round',
+    });
+    line.bindPopup(popupHtml(f.properties));
+    line.on('mouseover', function () { this.setStyle({ weight: FLAT_WEIGHT + 2, opacity: 1 }); });
+    line.on('mouseout', function () { this.setStyle({ weight: FLAT_WEIGHT, opacity: FLAT_OPACITY }); });
+    layer.addLayer(line);
+  }
+  return layer;
+}
+
+function updateStats(features) {
+  document.getElementById('statRuns').textContent = features.length;
+  const totalKm = features.reduce((sum, f) => sum + (f.properties.distance_km || 0), 0);
+  document.getElementById('statKm').textContent = totalKm.toFixed(1);
+
+  document.getElementById('statCoverage').textContent = `${ROTTERDAM_COVERAGE_PCT}%`;
+
+  const paces = features.map(f => parsePaceToSeconds(f.properties.avg_pace)).filter(v => v !== null);
+  if (paces.length) {
+    const avg = paces.reduce((a, b) => a + b, 0) / paces.length;
+    document.getElementById('statAvgPace').textContent = formatSecondsAsPace(avg);
+  } else {
+    document.getElementById('statAvgPace').textContent = '–';
+  }
+}
+
+document.getElementById('panelToggleBtn').addEventListener('click', () => {
+  document.getElementById('panel').classList.toggle('open');
+});
+
+fetch('runs.geojson')
+  .then(r => {
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    return r.json();
+  })
+  .then(data => {
+    state.allFeatures = data.features;
+    flatLayer = buildFlatLayer(data.features);
+    flatLayer.addTo(map);
+    updateStats(data.features);
+
+    const bounds = L.latLngBounds([]);
+    for (const f of data.features) {
+      for (const [lon, lat] of f.geometry.coordinates) bounds.extend([lat, lon]);
+    }
+    if (bounds.isValid()) {
+      map.fitBounds(bounds, { padding: [30, 30] });
+    } else {
+      map.setView([52.1, 5.1], 8);
+    }
+  })
+  .catch(err => {
+    console.error(err);
+    map.setView([52.1, 5.1], 8);
+  });
+</script>
+</body>
+</html>

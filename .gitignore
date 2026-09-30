@@ -1,0 +1,14 @@
+.venv/
+__pycache__/
+*.pyc
+.cache/
+.DS_Store
+.claude/
+
+# Raw Strava export: personal data (contacts, logins, emails...), never committed.
+export_*/
+
+# Rich per-run data (dates, names, pace, Strava links) for local/private use
+# only. The repo is public, so only the stripped docs/runs.public.geojson
+# (geometry only) is tracked and served publicly.
+runs.geojson
