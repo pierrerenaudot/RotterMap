@@ -19,7 +19,7 @@ import re
 from pathlib import Path
 
 # Kept in sync with map.html's ROTTERDAM_COVERAGE_PCT constant.
-ROTTERDAM_COVERAGE_PCT = 11.7
+ROTTERDAM_COVERAGE_PCT = 11.8
 
 src = json.loads(Path("runs.geojson").read_text())
 features = src["features"]
